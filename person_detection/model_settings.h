@@ -21,13 +21,13 @@ limitations under the License.
 
 // All of these values are derived from the values used during model training,
 // if you change your model you'll need to update these constants.
-constexpr int kNumCols = 128;
-constexpr int kNumRows = 128;
-constexpr int kNumChannels = 3;
+constexpr int kNumCols = 40;
+constexpr int kNumRows = 40;
+constexpr int kNumChannels = 1;
 
 constexpr int kMaxImageSize = kNumCols * kNumRows * kNumChannels;
 
-constexpr int kCategoryCount = 8;
+constexpr int kCategoryCount = 18;
 constexpr int kPersonIndex = 1;
 constexpr int kNotAPersonIndex = 0;
 extern const char* kCategoryLabels[kCategoryCount];

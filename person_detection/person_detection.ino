@@ -25,39 +25,36 @@ limitations under the License.
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/system_setup.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-#include "cam.hpp"
+
+#include "sample_input.h"
 
 // Globals, used for compatibility with Arduino-style sketches.
-namespace
-{
-  const tflite::Model *model = nullptr;
-  tflite::MicroInterpreter *interpreter = nullptr;
-  TfLiteTensor *input = nullptr;
+namespace {
+const tflite::Model* model = nullptr;
+tflite::MicroInterpreter* interpreter = nullptr;
+TfLiteTensor* input = nullptr;
 
-  // In order to use optimized tensorflow lite kernels, a signed int8_t quantized
-  // model is preferred over the legacy unsigned model format. This means that
-  // throughout this project, input images must be converted from unisgned to
-  // signed format. The easiest and quickest way to convert from unsigned to
-  // signed 8-bit integers is to subtract 128 from the unsigned value to get a
-  // signed value.
+// In order to use optimized tensorflow lite kernels, a signed int8_t quantized
+// model is preferred over the legacy unsigned model format. This means that
+// throughout this project, input images must be converted from unisgned to
+// signed format. The easiest and quickest way to convert from unsigned to
+// signed 8-bit integers is to subtract 128 from the unsigned value to get a
+// signed value.
 
-  // An area of memory to use for input, output, and intermediate arrays.
-  constexpr int kTensorArenaSize = 136 * 1024;
-  // Keep aligned to 16 bytes for CMSIS
-  alignas(16) uint8_t tensor_arena[kTensorArenaSize];
-} // namespace
+// An area of memory to use for input, output, and intermediate arrays.
+constexpr int kTensorArenaSize = 115 * 1024;
+// Keep aligned to 16 bytes for CMSIS
+alignas(16) uint8_t tensor_arena[kTensorArenaSize];
+}  // namespace
 
 // The name of this function is important for Arduino compatibility.
-void setup()
-{
-  cam_setup();
+void setup() {
   tflite::InitializeTarget();
 
   // Map the model into a usable data structure. This doesn't involve any
   // copying or parsing, it's a very lightweight operation.
   model = tflite::GetModel(g_person_detect_model_data);
-  if (model->version() != TFLITE_SCHEMA_VERSION)
-  {
+  if (model->version() != TFLITE_SCHEMA_VERSION) {
     MicroPrintf(
         "Model provided is schema version %d not equal "
         "to supported version %d.",
@@ -71,15 +68,19 @@ void setup()
   // incur some penalty in code space for op implementations that are not
   // needed by this graph.
   //
-  // tflite::AllOpsResolver resolver;
-  // NOLINTNEXTLINE(runtime-global-variables)
-  static tflite::MicroMutableOpResolver<5> micro_op_resolver;
-  // micro_op_resolver.AddAveragePool2D();
-  micro_op_resolver.AddConv2D();
-  // micro_op_resolver.AddDepthwiseConv2D();
-  micro_op_resolver.AddReshape();
-  micro_op_resolver.AddSoftmax();
-  micro_op_resolver.AddFullyConnected();
+//  tflite::AllOpsResolver micro_op_resolver;
+   // NOLINTNEXTLINE(runtime-global-variables)
+   static tflite::MicroMutableOpResolver<7> micro_op_resolver;
+   micro_op_resolver.AddConv2D();
+   micro_op_resolver.AddFullyConnected();
+   micro_op_resolver.AddQuantize();
+   micro_op_resolver.AddMaxPool2D();
+   micro_op_resolver.AddMul();
+   micro_op_resolver.AddAdd();
+//   micro_op_resolver.AddL2Normalization();
+   micro_op_resolver.AddReshape();
+//   micro_op_resolver.AddSoftmax();
+
 
   // Build an interpreter to run the model with.
   // NOLINTNEXTLINE(runtime-global-variables)
@@ -89,8 +90,7 @@ void setup()
 
   // Allocate memory from the tensor_arena for the model's tensors.
   TfLiteStatus allocate_status = interpreter->AllocateTensors();
-  if (allocate_status != kTfLiteOk)
-  {
+  if (allocate_status != kTfLiteOk) {
     MicroPrintf("AllocateTensors() failed");
     return;
   }
@@ -101,36 +101,38 @@ void setup()
   if ((input->dims->size != 4) || (input->dims->data[0] != 1) ||
       (input->dims->data[1] != kNumRows) ||
       (input->dims->data[2] != kNumCols) ||
-      (input->dims->data[3] != kNumChannels) || (input->type != kTfLiteInt8))
-  {
+      (input->dims->data[3] != kNumChannels) || (input->type != kTfLiteUInt8)) {
     MicroPrintf("Bad input tensor parameters in model");
     return;
   }
 }
 
 // The name of this function is important for Arduino compatibility.
-void loop()
-{
-  // Get image from provider.
-  if (kTfLiteOk != GetImage(input))
-  {
-    MicroPrintf("Image capture failed.");
-  }
+void loop() {
+//  // Get image from provider.
+//  if (kTfLiteOk != GetImage(input)) {
+//    MicroPrintf("Image capture failed.");
+//  }
+   // Using sample input data 
+   for (int i=0;i<kNumCols*kNumRows*kNumChannels;i++){
+     input->data.uint8[i] = sample_input_data[i];
+   }
 
   // Run the model on this input and make sure it succeeds.
-  if (kTfLiteOk != interpreter->Invoke())
-  {
+  if (kTfLiteOk != interpreter->Invoke()) {
     MicroPrintf("Invoke failed.");
   }
 
-  TfLiteTensor *output = interpreter->output(0);
+  TfLiteTensor* output = interpreter->output(0);
 
   // Process the inference results.
-  int8_t person_score = output->data.uint8[kPersonIndex];
-  int8_t no_person_score = output->data.uint8[kNotAPersonIndex];
-  float person_score_f =
-      (person_score - output->params.zero_point) * output->params.scale;
-  float no_person_score_f =
-      (no_person_score - output->params.zero_point) * output->params.scale;
-  RespondToDetection(person_score_f, no_person_score_f);
+  for(int j=0;j<kCategoryCount;j++){
+    // float output_j =
+    //   (output->data.uint8[j] - output->params.zero_point) * output->params.scale;
+    // float max_score_int, max_score_frac;
+    // max_score_frac = std::modf(output_j * 100, &max_score_int);
+    // MicroPrintf("Category %d: (%d.%d%%)", static_cast<int>(j),  static_cast<int>(max_score_int), static_cast<int>(max_score_frac*100));
+
+    MicroPrintf("Category %d: (%d)", static_cast<int>(j),  static_cast<int>(output->data.uint8[j]));
+  }
 }
